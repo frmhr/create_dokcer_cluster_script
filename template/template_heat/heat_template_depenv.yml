@@ -1,0 +1,211 @@
+heat_template_version: 2015-10-15
+
+parameters:
+  # tenant id
+  tenant_id:
+    type: string
+    description: tenant id
+
+  # external network
+  external_net_id:
+    type: string
+    description: External Network ID to use for the instance.
+
+  external_net_range:
+    type: string
+    description: External Network Range to use for the instance.
+
+  # internal network
+  priv_net_name:
+    type: string
+    description: Private Network Name to use for the instance.
+    default: test_self_net
+
+  # DNS Address
+  dns_address1:
+    type: string
+    description: DNS Adress.
+    default: "8.8.8.8"
+
+  dns_address2:
+    type: string
+    description: DNS Adress.
+    default: "8.8.4.4"
+
+  # internal network range
+  priv_net_range:
+    type: string
+    description: Private Network Range to use for the instance.
+    default: "10.0.0.0/24"
+
+  priv_subnet_name:
+    type: string
+    description: Private Subnet Name to use for the instance.
+    default: test_subself_net
+
+  # router
+  router_name:
+    type: string
+    description: Router Name
+    default: router_ext
+
+  # manage node
+  manage_node_name:
+    type: string
+    description: manage Node Name
+    default: manage
+
+  manage_node_image_name:
+    type: string
+    description: manage Node Image
+    default: ubuntu14
+
+  manage_node_flavor_name:
+    type: string
+    description: manage Node Flavor
+    default: m1.small
+
+  manage_node_key_name:
+    type: string
+    description: manage Node Key
+    default: mykey
+
+  manage_node_security_group_name:
+      type: string
+      description: manage Node Security Group
+      default: node_sg
+
+resources:
+  # 内部ネットワーク作成
+  priv_net:
+    type: OS::Neutron::Net
+    properties:
+      name: { get_param: priv_net_name }
+
+  # 内部サブネット作成
+  priv_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: { get_param: priv_subnet_name}
+      network_id: { get_resource: priv_net }
+      cidr: { get_param: priv_net_range }
+      dns_nameservers: [{ get_param: dns_address1 }, { get_param: dns_address2 }]
+      ip_version: 4
+    depends_on: priv_net
+
+  # ルータ作成
+  router_ext:
+    type: OS::Neutron::Router
+    properties:
+      admin_state_up: true
+      name: { get_param: router_name}
+    depends_on: priv_subnet
+
+  # ルータと外部ネットワークの接続
+  port_join_router_to_ext:
+    type: OS::Neutron::RouterGateway
+    properties:
+      network_id: { get_param: external_net_id }
+      router_id: { get_resource: router_ext }
+    depends_on: router_ext
+
+  # ルータと内部ネットワークの接続
+  port_join_router_to_priv:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: router_ext }
+      subnet_id: { get_resource: priv_subnet }
+    depends_on: router_ext
+
+  # セキュリティグループ作成
+  node_security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: { get_param: manage_node_security_group_name }
+      rules:
+         - { remote_ip_prefix: "0.0.0.0/0" , direction: ingress, protocol: tcp, port_range_min: 22, port_range_max: 22 }
+         - { remote_ip_prefix: { get_param: external_net_range } , direction: ingress, protocol: tcp, port_range_min: 2376, port_range_max: 2377 }
+         - { remote_ip_prefix: "0.0.0.0/0" , direction: egress, protocol: icmp }
+         - { remote_ip_prefix: "0.0.0.0/0" , direction: egress, protocol: tcp, port_range_min: 1, port_range_max: 65535 }
+         - { remote_ip_prefix: "0.0.0.0/0" , direction: egress, protocol: udp, port_range_min: 1, port_range_max: 65535 }
+    depends_on: priv_subnet
+
+  # 管理ノード用ポートの作成
+  manage_port0:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: priv_net }
+      security_groups:
+        - { get_param: manage_node_security_group_name }
+    depends_on: [ priv_net, node_security_group ]
+
+  # 管理ノード作成
+  manage_node:
+    type: OS::Nova::Server
+    properties:
+      name: { get_param: manage_node_name}
+      image: { get_param: manage_node_image_name }
+      flavor: { get_param: manage_node_flavor_name }
+      networks:
+        - port: { get_resource: manage_port0 }
+      key_name: { get_param: manage_node_key_name }
+      user_data_format: RAW
+      user_data: |
+        #!/bin/bash
+        sudo apt-get remove docker docker-engine docker.io -y
+        sudo apt-get update -y
+        sudo apt-get install apt-transport-https ca-certificates curl software-properties-common -y
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+        sudo add-apt-repository  "deb [arch=amd64] https://download.docker.com/linux/ubuntu  $(lsb_release -cs) stable"
+        sudo apt-get update -y
+        sudo apt-get install docker-ce -y
+        sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+        sudo chmod +x /usr/local/bin/docker-compose
+        base=https://github.com/docker/machine/releases/download/v0.14.0 && curl -L $base/docker-machine-$(uname -s)-$(uname -m) >/tmp/docker-machine && sudo install /tmp/docker-machine /usr/local/bin/docker-machine
+        sudo sed -i '$ a 172.16.1.166    controller.jpn.linux.hpe.com    controller' /etc/hosts
+        #echo OS_TENANT_ID={ get_param: tenant_id } > /home/ubuntu/.ssh/environment
+        sudo sed -i '$ a PermitUserEnvironment yes' /etc/ssh/sshd_config
+        sudo service ssh restart
+    depends_on: priv_subnet
+
+  # フローティングIPの割り当て
+  attach_floating_ip_to_manage:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: { get_param: external_net_id }
+      port_id: { get_resource: manage_port0 }
+    depends_on: [ manage_node, port_join_router_to_ext, port_join_router_to_priv ]
+
+outputs:
+  priv_net_status:
+    description: status of priv_net
+    value: { get_attr: [ priv_net, status ] }
+
+  priv_subnet_show:
+    description: show of priv_subnet
+    value: { get_attr: [ priv_subnet, show ] }
+
+  router_ext_status:
+    description: status of router_ext
+    value: { get_attr: [ router_ext, status ] }
+
+  port_join_router_to_ext_show:
+    description: show of port_join_router_to_ext
+    value: { get_attr: [ port_join_router_to_ext, show ] }
+
+  port_join_router_to_priv_show:
+    description: show of port_join_router_to_priv
+    value: { get_attr: [ port_join_router_to_priv, show ] }
+
+  manage_port0_status:
+    description: status of manage_port0
+    value: { get_attr: [ manage_port0, status ] }
+
+  manage_node_show:
+    description: show of manage_node
+    value: { get_attr: [ manage_node, show ] }
+
+  attach_floating_ip_to_manage_show:
+    description: show of attach_floating_ip_to_manage
+    value: { get_attr: [ attach_floating_ip_to_manage, show ] }

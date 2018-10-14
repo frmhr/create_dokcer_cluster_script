@@ -1,0 +1,36 @@
+説明：
+  aws or openstack環境でdocker-swarmクラスタを構築するプレイブック
+  aws、またはopenstackのAPIにアクセス可能、かつ作成されるネットワークにアクセス可能な
+  端末からコマンドを実行する
+
+  awsの場合は、下記が作成される
+    ・VPC
+    ・サブネット
+    ・インターネットゲートウェイ
+    ・EIP(各ノードに割り当て)
+    ・管理用ノード
+    ・ワーカーノード（台数指定可能 add_nodes=xx）
+
+  openstackの場合は、下記が作成される
+  　・プライベートネット
+  　・プライベートサブネット
+  　・ルータ
+    ・フローティングIP（各ノードに割り当て）
+    ・管理用ノード
+    ・ワーカーノード（台数指定可能 add_nodes=xx）
+  　
+使い方：
+  1. 作成するプラットフォームに応じたクレデンシャルを、実行環境の環境変数に設定する
+    awsの場合      ：depenv/credential/credential_aws/env
+    openstackの場合：depenv/credential/credential_openstack/env
+
+  2. パラメータを設定する
+    awsの場合      ：hosts/dep_aws/group_vars/all.yml
+    openstackの場合：hosts/dep_openstack/group_vars/all.yml
+    stack_nameはデフォルトで空なので設定する
+    ワーカーノードを作成する場合はadd_nodesに１以上を設定する
+    その他、設定不要とコメントしているところ以外は環境に合わせて設定
+
+  3. コマンドを実行する
+    awsの場合      ：ansible-playbook -i hosts/dep_aws depenv.yml
+    openstackの場合：ansible-playbook -i hosts/dep_openstack depenv.yml

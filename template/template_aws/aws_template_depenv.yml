@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  VPCName:
+    Description: "VPCName"
+    Type: String
+    Default: "TestVPC"
+
+  VPCRange:
+    Description: "VPCRange"
+    Type: String
+    Default: "10.0.0.0/16"
+
+  PrivSubnetName:
+    Description: "PrivSubnetName"
+    Type: String
+    Default: "PrivSubnet"
+
+  PrivSubnetRange:
+    Description: "PrivSubnetRange"
+    Type: String
+    Default: "10.0.1.0/24"
+
+  InternetGatewayName:
+    Description: "InternetGatewayName"
+    Type: String
+    Default: "InternetGateway"
+
+  PrivSubnetRouteTableName:
+    Description: "PrivSubnetRouteTable Name"
+    Type: String
+    Default: "PrivSubnetRouteTable"
+
+  InstanceName:
+    Description: "Instance Name"
+    Type: String
+    Default: "manage"
+
+  KeyPairName:
+    Description: "KeyPair Name"
+    Type: String
+    Default: "my-key"
+
+  AzName:
+    Description: "AvailabilityZone Name"
+    Type: String
+    Default: "ap-northeast-xx"
+
+  ImageName:
+    Description: "Image Name"
+    Type: String
+    Default: "ami-0c5ff2ffcb6054873"
+
+  InstanceTypeName:
+    Description: "Instance Type Name"
+    Type: String
+    Default: "t2.micro"
+
+  ManageIp:
+    Description: "Manage Node IP Address"
+    Type: String
+    Default: "10.0.1.10"
+
+  SecurityGroupName:
+    Description: "Manage Node's Security Group Name"
+    Type: String
+    Default: "NODE-SG"
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCRange
+      Tags:
+      - Key: Name
+        Value: !Ref VPCName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Ref InternetGatewayName
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn: [VPC, InternetGateway]
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PrivSubnet:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPC
+    Properties:
+      AvailabilityZone: !Ref AzName
+      CidrBlock: !Ref PrivSubnetRange
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Ref PrivSubnetName
+
+  PrivSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn: AttachGateway
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Ref PrivSubnetRouteTableName
+
+  PrivSubnetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PrivSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PrivSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: [PrivSubnet, PrivSubnetRouteTable]
+    Properties:
+      SubnetId: !Ref PrivSubnet
+      RouteTableId: !Ref PrivSubnetRouteTable
+
+  MngSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    DependsOn: VPC
+    Properties:
+      GroupName: !Ref SecurityGroupName
+      GroupDescription: NODE-SG
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Ref SecurityGroupName
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '2376'
+        ToPort: '2376'
+        CidrIp: !Ref PrivSubnetRange
+      - IpProtocol: tcp
+        FromPort: '2377'
+        ToPort: '2377'
+        CidrIp: !Ref PrivSubnetRange
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: '0'
+        ToPort: '65535'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: udp
+        FromPort: '0'
+        ToPort: '65535'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: icmp
+        FromPort: '-1'
+        ToPort: '-1'
+        CidrIp: 0.0.0.0/0
+
+  ManageInstance:
+    Type: "AWS::EC2::Instance"
+    DependsOn: [PrivSubnet, MngSecurityGroup]
+    Properties:
+      AvailabilityZone: !Ref AzName
+      InstanceInitiatedShutdownBehavior: 'stop'
+      ImageId: !Ref ImageName
+      InstanceType: !Ref InstanceTypeName
+      KeyName: !Ref KeyPairName
+      PrivateIpAddress: !Ref ManageIp
+      SecurityGroupIds:
+        - !GetAtt MngSecurityGroup.GroupId
+      SubnetId: !Ref PrivSubnet
+      Tags:
+        - Key: 'Name'
+          Value: !Ref InstanceName
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          sudo apt-get remove docker docker-engine docker.io -y
+          sudo apt-get update -y
+          sudo apt-get install apt-transport-https ca-certificates curl software-properties-common -y
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+          sudo add-apt-repository  "deb [arch=amd64] https://download.docker.com/linux/ubuntu  $(lsb_release -cs) stable"
+          sudo apt-get update -y
+          sudo apt-get install docker-ce -y
+          sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          base=https://github.com/docker/machine/releases/download/v0.14.0 && curl -L $base/docker-machine-$(uname -s)-$(uname -m) >/tmp/docker-machine && sudo install /tmp/docker-machine /usr/local/bin/docker-machine
+
+  ElasticIP:
+    Type: "AWS::EC2::EIP"
+    DependsOn: PrivSubnetRouteTableAssociation
+    Properties:
+      Domain: vpc
+
+  ElasticIPAssociate:
+    Type: AWS::EC2::EIPAssociation
+    DependsOn: [ ManageInstance, ElasticIP ]
+    Properties:
+      AllocationId: !GetAtt ElasticIP.AllocationId
+      InstanceId: !Ref ManageInstance
+
+Outputs:
+  VPCID:
+    Description: "VPC ID."
+    Value: !Ref VPC
+
+  PrivSubnetID:
+    Description: "PrivSubnet ID."
+    Value: !Ref PrivSubnet
+
+  ManageElasticIP:
+    Description: "Management Node's Elastic IP."
+    Value: !Ref ElasticIP
+
+  NodeSecurityGroupName:
+    Description: "MngSecurityGroup Name."
+    Value: !Ref SecurityGroupName

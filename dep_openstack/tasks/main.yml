@@ -1,0 +1,138 @@
+---
+# tasks file for dep_openstack
+- name: OpenStackでの開発環境の構築
+  debug:
+    msg: "プラットフォーム：{{platform}}, 追加するノードの数：{{add_nodes}}"
+
+- name: スタックの作成
+  ignore_errors: True
+  register: stack_create
+  os_stack:
+    #cloud: demo
+    name: "{{ stack_name }}"
+    tag: "{{ tag_name }}"
+    state: present
+    template: "{{ template_path }}"
+    parameters:
+      tenant_id: "{{tenant_id}}"
+      external_net_id: "{{ external_net_id }}"
+      external_net_range: "{{ external_net_range }}"
+      priv_net_name: "{{priv_net_name}}"
+      dns_address1: "{{dns_address1}}"
+      dns_address2: "{{dns_address2}}"
+      priv_net_range: "{{priv_net_range}}"
+      priv_subnet_name: "{{priv_subnet_name}}"
+      router_name: "{{router_name}}"
+      manage_node_name: "{{manage_node_name}}"
+      manage_node_image_name: "{{manage_node_image_name}}"
+      manage_node_flavor_name: "{{manage_node_flavor_name}}"
+      manage_node_key_name: "{{manage_node_key_name}}"
+      manage_node_security_group_name: "{{manage_node_security_group_name}}"
+
+- name: 管理ノードのIP取得
+  set_fact:
+    manage_ip: "{{ stack_create.stack.outputs[2].output_value.floating_ip_address }}"
+
+- name: 管理ノードにdocker-machineがインストールされるまで待機
+  shell: ssh -oStrictHostKeyChecking=no -i {{ local_key_path }} ubuntu@{{ manage_ip }} "sudo docker-machine version"
+  register: docker_machine_check
+  until: docker_machine_check.stdout.find('docker-machine version') != -1
+  retries: 90
+  delay: 20
+  changed_when: False
+
+- name: docker-machineのバージョン確認
+  debug:
+    msg: "{{ docker_machine_check }}"
+
+- name: 管理ノードにdocker-composeがインストールされるまで待機
+  shell: ssh -oStrictHostKeyChecking=no -i {{ local_key_path }} ubuntu@{{ manage_ip }} "sudo docker-compose --version"
+  register: docker_compose_check
+  until: docker_compose_check.stdout.find('docker-compose version') != -1
+  retries: 90
+  delay: 10
+  changed_when: False
+
+- name: docker-composeのバージョン確認
+  debug:
+    msg: "{{ docker_compose_check }}"
+
+- name: 管理ノードにdockerが起動されるまで待機
+  shell: ssh -oStrictHostKeyChecking=no -i {{ local_key_path }} ubuntu@{{ manage_ip }} "sudo docker version"
+  register: docker_check
+  until: docker_check.stdout.find('Version:') != -1
+  retries: 90
+  delay: 10
+  changed_when: False
+
+- name: 管理ノードにテナントIDを環境変数として設定する（docker-machineの不具合対策）
+  shell: ssh -oStrictHostKeyChecking=no -i {{ local_key_path }} ubuntu@{{ manage_ip }} "echo OS_TENANT_ID={{ tenant_id }} > /home/ubuntu/.ssh/environment"
+
+- name: 作成するノード数の確認
+  debug:
+    msg: "作成するノード数：{{ add_nodes }}"
+
+- name: ループ用変数設定 1/2
+  set_fact:
+    seq_end: "{{add_nodes}}"
+  when: add_nodes > "0"
+
+- name: ループ用変数設定 2/2
+  set_fact:
+    seq_end: "1"
+  when: add_nodes == "0"
+
+- name: ノードの作成
+  shell: ssh -oStrictHostKeyChecking=no -i {{ local_key_path }} ubuntu@{{ manage_ip }} \
+    docker-machine -D create \
+    --driver openstack \
+    --openstack-username "{{os_docker_username}}" \
+    --openstack-password "{{os_docker_password}}" \
+    --openstack-tenant-name "{{os_docker_tenant_name}}" \
+    --openstack-auth-url "{{os_docker_auth_url}}" \
+    --openstack-domain-name "{{os_docker_openstack_domain_name}}" \
+    --openstack-flavor-name "{{os_docker_flavor_name}}" \
+    --openstack-image-name "{{os_docker_openstack_image_name}}" \
+    --openstack-net-name  "{{os_docker_net_name}}" \
+    --openstack-sec-groups "{{os_docker_sec_groups}}" \
+    --openstack-ssh-user "{{os_docker_ssh_user}}" \
+    --openstack-floatingip-pool  "{{os_docker_floatingip_pool}}" \
+    {{ item }}
+  with_sequence: start=1 end={{ seq_end }} format=node%d
+  when: add_nodes > "0"
+
+- name: ノードの確認
+  shell: ssh -oStrictHostKeyChecking=no -i {{ local_key_path }} ubuntu@{{ manage_ip }} \
+    docker-machine ssh {{ item }} sudo docker version
+  register: result
+  until: result.stdout.find('Version:')
+  retries: 3
+  delay: 1
+  with_sequence: start=1 end={{ seq_end }} format=node%d
+  when: add_nodes > "0"
+  changed_when: False
+
+- name: manager nodeの初期化
+  shell: ssh -oStrictHostKeyChecking=no -i {{ local_key_path }} ubuntu@{{ manage_ip }} sudo docker swarm init --advertise-addr {{ manage_ip }}:2377
+  when: add_nodes > "0"
+  tags: swarm_manager_init
+
+- name: manager tokenの取得
+  shell: ssh -oStrictHostKeyChecking=no -i {{ local_key_path }} ubuntu@{{ manage_ip }} sudo docker swarm join-token -q manager
+  register: manager_token
+  when: add_nodes > "0"
+  tags: swarm_get_token_m
+  changed_when: False
+
+- name: worker tokenの取得
+  shell: ssh -oStrictHostKeyChecking=no -i {{ local_key_path }} ubuntu@{{ manage_ip }} sudo docker swarm join-token -q worker
+  register: worker_token
+  when: add_nodes > "0"
+  tags: swarm_get_token_w
+  changed_when: False
+
+- name: workerの参加
+  shell: ssh -oStrictHostKeyChecking=no -i {{ local_key_path }} ubuntu@{{ manage_ip }} "docker-machine ssh {{ item }} sudo docker swarm join --token {{ worker_token.stdout }} {{manage_ip}}:2377"
+  with_sequence: start=1 end={{ seq_end }} format=node%d
+  when: add_nodes > "0"
+  tags: swarm_join_w

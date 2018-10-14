@@ -1,0 +1,17 @@
+---
+- name: docker開発環境のデプロイ
+  hosts: localhost
+  connection: local
+  become: false
+  
+  roles:
+    - role: dep_validation
+      tags: dep_validation
+
+    - role: dep_openstack
+      when: platform == "openstack"
+      tags: dep_openstack
+
+    - role: dep_aws
+      when: platform == "aws"
+      tags: dep_aws

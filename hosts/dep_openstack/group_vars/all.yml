@@ -1,0 +1,102 @@
+# プラットフォーム
+platform: "openstack"
+
+# 管理ノード以外に追加するノードの数
+add_nodes: "0"
+
+# スタック名
+stack_name: ""
+
+
+
+#---Heat関連---
+# 管理ノードのIP（設定不要）
+manage_ip: ""
+
+# タグ名
+tag_name: "{{stack_name}}"
+
+# HOTのパス
+template_path: "/root/depenv/template/template_heat/heat_template_depenv.yml"
+
+# テナントID（テナントはすでに作成済みであることを想定）
+# Docker-machineの不具合対策
+tenant_id: ""
+
+# 外部ネットワークのID（外部ネットワークはすでに作成済みであることを想定）
+external_net_id: ""
+
+# 外部ネットワークのネットワークアドレス(外部ネットワークはすでにあることを想定）
+external_net_range: "172.16.0.0/16"
+
+# プライベートネットワーク名
+priv_net_name: "test_self_net"
+
+# DNSサーバのアドレス1
+dns_address1: "8.8.8.8"
+
+# DNSサーバのアドレス2
+dns_address2: "8.8.4.4"
+
+# プライベートサブネットのアドレス範囲
+priv_net_range: "10.0.0.0/24"
+
+# プライベートサブネット名
+priv_subnet_name: "test_subself_net"
+
+# ルータ名
+router_name: "router_ext"
+
+# 管理ノード名
+manage_node_name: "manage"
+
+# 管理ノードのイメージ名
+manage_node_image_name: "ubuntu14"
+
+# 管理ノードのフレーバー名
+manage_node_flavor_name: "m1.small"
+
+# 管理ノードのキーペア名
+manage_node_key_name: "mykey"
+
+# 管理ノードのセキュリティグループ名
+manage_node_security_group_name: "node_sg"
+
+# 管理ノードのキーペアの秘密鍵のパス　キーペアは作成済みを想定
+local_key_path: "~/depenv/key/key_openstack/id_rsa"
+
+
+
+#---docker-machine関連---
+# ユーザ名
+os_docker_username: "demo"
+
+# パスワード
+os_docker_password: "password1234"
+
+# テナント名
+os_docker_tenant_name: "demo"
+
+# 認証URL
+os_docker_auth_url: "http://controller:5000/v3"
+
+# ドメイン名
+os_docker_openstack_domain_name: "default"
+
+# ワーカーノードのフレーバー名
+os_docker_flavor_name: "m1.small"
+
+# ワーカーノードのイメージ名
+os_docker_openstack_image_name: "ubuntu14"
+
+# ワーカーノードのサブネット名
+os_docker_net_name: "{{priv_net_name}}"
+
+# ワーカーノードのセキュリティグループ名
+os_docker_sec_groups: "{{manage_node_security_group_name}}"
+
+# ワーカーノードのsshユーザ名
+os_docker_ssh_user: "ubuntu"
+
+# 外部ネットワーク名
+os_docker_floatingip_pool: "provider"

@@ -1,0 +1,154 @@
+---
+# tasks file for dep_aws
+- name: AWSでの開発環境の構築
+  debug:
+    msg: "プラットフォーム：{{platform}}, 追加するノードの数：{{add_nodes}}"
+
+- name: awsスタックの作成
+  ignore_errors: True
+  cloudformation:
+    region: "{{ aws_region }}"
+    stack_name: "{{ aws_cfn_stack_name }}"
+    state: "present"
+    template: "{{ aws_cfn_template_file }}"
+    template_parameters:
+      VPCName: "{{ aws_cfn_vpc_name }}"
+      VPCRange: "{{ aws_cfn_vpc_range }}"
+      PrivSubnetName: "{{ aws_cfn_privsubnet_name }}"
+      PrivSubnetRange: "{{ aws_cfn_privsubnet_range }}"
+      InternetGatewayName: "{{ aws_cfn_internetgateway_name }}"
+      PrivSubnetRouteTableName: "{{ aws_cfn_privsubnet_routetable_name }}"
+      InstanceName: "{{ aws_cfn_instance_name }}"
+      KeyPairName: "{{ aws_cfn_keypair_name }}"
+      AzName: "{{ aws_cfn_availability_zone_name }}"
+      ImageName: "{{ aws_cfn_image_name }}"
+      InstanceTypeName: "{{ aws_cfn_instance_type_name }}"
+      ManageIp: "{{ aws_cfn_manage_ip }}"
+      SecurityGroupName: "{{ aws_cfn_security_group_name }}"
+  register: stack_create
+
+- name: 確認
+  debug:
+    msg: "{{ stack_create.stack_outputs }}"
+
+- name: vpc取得
+  set_fact:
+    aws_docker_vpc_id: "{{ stack_create.stack_outputs.VPCID }}"
+
+- name: Subnet取得
+  set_fact:
+    aws_docker_subnet_id: "{{ stack_create.stack_outputs.PrivSubnetID }}"
+
+- name: セキュリティグループ取得
+  set_fact:
+    aws_docker_security_group: "{{ stack_create.stack_outputs.NodeSecurityGroupName }}"
+
+- name: 管理ノードのEIP取得
+  set_fact:
+    manage_eip: "{{ stack_create.stack_outputs.ManageElasticIP }}"
+
+- name: 管理ノードにdocker-machineがインストールされるまで待機
+  shell: ssh -oStrictHostKeyChecking=no -i {{ aws_cfn_local_key_path }} ubuntu@{{ manage_eip }} "sudo docker-machine version"
+  register: docker_machine_check
+  until: docker_machine_check.stdout.find('docker-machine version') != -1
+  retries: 90
+  delay: 20
+  changed_when: False
+
+- name: docker-machineのバージョン確認
+  debug:
+    msg: "{{ docker_machine_check }}"
+
+- name: 管理ノードにdocker-composeがインストールされるまで待機
+  shell: ssh -oStrictHostKeyChecking=no -i {{ aws_cfn_local_key_path }} ubuntu@{{ manage_eip }} "sudo docker-compose --version"
+  register: docker_compose_check
+  until: docker_compose_check.stdout.find('docker-compose version') != -1
+  retries: 90
+  delay: 10
+  changed_when: False
+
+- name: docker-composeのバージョン確認
+  debug:
+    msg: "{{ docker_compose_check }}"
+
+- name: 管理ノードにdockerが起動されるまで待機
+  shell: ssh -oStrictHostKeyChecking=no -i {{ aws_cfn_local_key_path }} ubuntu@{{ manage_eip }} "sudo docker version"
+  register: docker_check
+  until: docker_check.stdout.find('Version:') != -1
+  retries: 90
+  delay: 10
+  changed_when: False
+
+- name: dockerのバージョン確認
+  debug:
+    msg: "{{ docker_check }}"
+
+- name: 作成するノード数の確認
+  debug:
+    msg: "作成するノード数：{{ add_nodes }}"
+
+- name: ループ用変数設定 1/2
+  set_fact:
+    seq_end: "{{add_nodes}}"
+  when: add_nodes > "0"
+
+- name: ループ用変数設定 2/2
+  set_fact:
+    seq_end: "1"
+  when: add_nodes == "0"
+
+- name: ノードの作成
+  shell: ssh -oStrictHostKeyChecking=no -i {{ aws_cfn_local_key_path }} ubuntu@{{ manage_eip }} \
+    docker-machine -D create \
+    --driver amazonec2 \
+    --amazonec2-access-key "{{ aws_docker_access_key }}" \
+    --amazonec2-secret-key "{{ aws_docker_secret_key }}" \
+    --amazonec2-vpc-id "{{ aws_docker_vpc_id }}" \
+    --amazonec2-region "{{ aws_docker_region }}" \
+    --amazonec2-ami "{{ aws_docker_ami }}" \
+    --amazonec2-zone "{{ aws_docker_zone }}" \
+    --amazonec2-subnet-id "{{ aws_docker_subnet_id }}" \
+    --amazonec2-security-group "{{ aws_docker_security_group }}" \
+    --amazonec2-tags "Name,{{ item }}" \
+    --amazonec2-instance-type "{{ aws_docker_instance_type }}" \
+    --amazonec2-ssh-user "{{ aws_docker_ssh_user }}" \
+    --amazonec2-use-private-address \
+    {{ item }}
+  with_sequence: start=1 end={{ seq_end }} format=node%d
+  when: add_nodes > "0"
+
+- name: ノードの確認
+  shell: ssh -oStrictHostKeyChecking=no -i {{ aws_cfn_local_key_path }} ubuntu@{{ manage_eip }} \
+    docker-machine ssh {{ item }} sudo docker version
+  register: result
+  until: result.stdout.find('Version:')
+  retries: 3
+  delay: 1
+  with_sequence: start=1 end={{ seq_end }} format=node%d
+  when: add_nodes > "0"
+  changed_when: False
+
+- name: manager nodeの初期化
+  shell: ssh -oStrictHostKeyChecking=no -i {{ aws_cfn_local_key_path }} ubuntu@{{ manage_eip }} sudo docker swarm init --advertise-addr {{ swarm_manage_ip }}:2377
+  when: add_nodes > "0"
+  tags: swarm_manager_init
+
+- name: manager tokenの取得
+  shell: ssh -oStrictHostKeyChecking=no -i {{ aws_cfn_local_key_path }} ubuntu@{{ manage_eip }} sudo docker swarm join-token -q manager
+  register: manager_token
+  when: add_nodes > "0"
+  tags: swarm_get_token_m
+  changed_when: False
+
+- name: worker tokenの取得
+  shell: ssh -oStrictHostKeyChecking=no -i {{ aws_cfn_local_key_path }} ubuntu@{{ manage_eip }} sudo docker swarm join-token -q worker
+  register: worker_token
+  when: add_nodes > "0"
+  tags: swarm_get_token_w
+  changed_when: False
+
+- name: workerの参加
+  shell: ssh -oStrictHostKeyChecking=no -i {{ aws_cfn_local_key_path }} ubuntu@{{ manage_eip }} "docker-machine ssh {{ item }} sudo docker swarm join --token {{ worker_token.stdout }} {{swarm_manage_ip}}:2377"
+  with_sequence: start=1 end={{ seq_end }} format=node%d
+  when: add_nodes > "0"
+  tags: swarm_join_w

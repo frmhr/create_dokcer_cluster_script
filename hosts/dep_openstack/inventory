@@ -1,0 +1,3 @@
+[local]
+mylocalhost ansible_connection=local
+

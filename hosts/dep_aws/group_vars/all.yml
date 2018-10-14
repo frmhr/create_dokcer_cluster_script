@@ -1,0 +1,99 @@
+# プラットフォーム
+platform: "aws"
+
+# 管理ノード以外に追加するノードの数
+add_nodes: "0"
+
+# スタック名
+stack_name: ""
+
+#---CloudFormation関連---
+# 管理ノードの外部IP（設定不要）
+manage_eip: ""
+
+# リージョン名
+aws_region: "ap-northeast-1"
+
+# テンプレートのパス
+aws_cfn_template_file: "~/depenv/template/template_aws/aws_template_depenv.yml"
+
+# スタック名
+aws_cfn_stack_name: "t{{stack_name}}"
+
+# VPC名
+aws_cfn_vpc_name: "{{ aws_cfn_stack_name }}VPC"
+
+# VPCのアドレス範囲
+aws_cfn_vpc_range: "10.0.0.0/16"
+
+# サブネット名
+aws_cfn_privsubnet_name: "PrivSubnet"
+
+# サブネットのアドレス範囲
+aws_cfn_privsubnet_range: "10.0.1.0/24"
+
+# インターネットゲートウェイ名
+aws_cfn_internetgateway_name: "InternetGateway"
+
+# ルートテーブル名
+aws_cfn_privsubnet_routetable_name: "PrivSubnetRouteTable"
+
+# 管理ノード名
+aws_cfn_instance_name: "manage"
+
+# 管理ノードのキーペア名
+aws_cfn_keypair_name: "my-key"
+
+# アベイラビリティゾーン名
+aws_cfn_availability_zone_name: "xx-xx-xx"
+
+# 管理ノードのイメージ名
+aws_cfn_image_name: "ami-0c5ff2ffcb6054873"
+
+# 管理ノードのインスタンスタイプ名
+aws_cfn_instance_type_name: "t2.micro"
+
+# 管理ノードのプライベートIP
+aws_cfn_manage_ip: "10.0.1.10"
+
+# セキュリティグループ名
+aws_cfn_security_group_name: "NODE-SG"
+
+# 管理ノードのキーペアの秘密鍵のパス　キーペアは作成済みを想定
+aws_cfn_local_key_path: "~/depenv/key/key_aws/my-key.pem"
+
+
+
+#---docker-machine関連---
+# アクセスキー
+aws_docker_access_key: ""
+
+# シークレットキー
+aws_docker_secret_key: ""
+
+# VPCのID（設定不要）
+aws_docker_vpc_id: ""
+
+# リージョン名
+aws_docker_region: "{{ aws_region }}"
+
+# ワーカーノードのイメージ名
+aws_docker_ami: "ami-0c5ff2ffcb6054873"
+
+# ワーカーノードのアベイラビリティゾーン
+aws_docker_zone: "c"
+
+# ワーカーノードのサブネットID（設定不要）
+aws_docker_subnet_id: ""
+
+# ワーカーノードのセキュリティグループ名
+aws_docker_security_group: "{{ aws_cfn_security_group_name }}"
+
+# ワーカーノードのインスタンスタイプ名
+aws_docker_instance_type: "t2.micro"
+
+# ワーカーノードのsshユーザ名
+aws_docker_ssh_user: "ubuntu"
+
+# 管理ノードのIP
+swarm_manage_ip: "{{ aws_cfn_manage_ip }}"

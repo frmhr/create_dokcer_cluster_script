@@ -1,0 +1,15 @@
+---
+# tasks file for dep_validation
+#　最低限の引数・パラメータチェックのみ
+
+- name: プラットフォームのパラメータチェック
+  fail: msg="platform {{platform}} is invalid."
+  when: platform != "openstack" and platform != "aws"
+
+- name: ノード数の引数チェック
+  fail: msg="bad add_nodes number {{add_nodes}}. Please set  0 =< add_nodes =< 5 "
+  when: add_nodes < "0" or add_nodes > "5"
+
+- name: スタック名が空でないかチェック
+  fail: msg="stack name is empty. Check all.yml"
+  when: stack_name == ""
